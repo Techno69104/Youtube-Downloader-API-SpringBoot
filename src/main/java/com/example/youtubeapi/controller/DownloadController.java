@@ -23,26 +23,21 @@ public class DownloadController {
     private String downloadDir;
 
     // ============================================
-    // PROXY CONFIGURATION - UPDATE THIS SECTION
+    // PROXY CONFIGURATION - UPDATE THIS LINE
     // ============================================
-    // Option A: Use a free proxy (unstable, for testing only)
-    // private static final String PROXY_URL = "http://45.87.247.26:80";
+    // Try one of these free US proxies (updated daily)
+    // Proxy 1 (USA): http://192.252.214.128:80
+    // Proxy 2 (USA): http://47.243.62.234:80  
+    // Proxy 3 (USA): http://162.223.89.34:80
+    // Proxy 4 (Germany): http://46.4.96.137:3128
     
-    // Option B: Use a paid proxy service like BrightData, ProxyMesh, or ScraperAPI
-    // private static final String PROXY_URL = "http://username:password@proxy-provider.com:8000";
-    
-    // Option C: Use a SOCKS5 proxy (more secure)
-    // private static final String PROXY_URL = "socks5://localhost:1080";
-    
-    // Currently disabled - set to null to use no proxy
-    private static final String PROXY_URL = null; // Change this to your proxy URL when ready
+    private static final String PROXY_URL = "http://192.252.214.128:80"; // CHANGE THIS to a working proxy
     
     // Helper method to add proxy to commands if configured
     private String[] addProxyIfNeeded(String[] baseCommand) {
-        if (PROXY_URL != null && !PROXY_URL.isEmpty()) {
-            // Insert --proxy right after yt-dlp
+        if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
             String[] newCommand = new String[baseCommand.length + 2];
-            newCommand[0] = baseCommand[0]; // yt-dlp
+            newCommand[0] = baseCommand[0];
             newCommand[1] = "--proxy";
             newCommand[2] = PROXY_URL;
             System.arraycopy(baseCommand, 1, newCommand, 3, baseCommand.length - 1);
@@ -58,8 +53,10 @@ public class DownloadController {
     public ResponseEntity<?> getVideoInfo(@RequestParam String url) {
         try {
             System.out.println("Fetching info for URL: " + url);
-            if (PROXY_URL != null) {
+            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
                 System.out.println("Using proxy: " + PROXY_URL);
+            } else {
+                System.out.println("No proxy configured");
             }
             
             String[] baseCommand = {
@@ -69,6 +66,7 @@ public class DownloadController {
                 "--no-download",
                 "--no-playlist",
                 "--extractor-args", "youtube:player-client=android",
+                "--socket-timeout", "30",
                 url
             };
             
@@ -85,7 +83,7 @@ public class DownloadController {
                 output.append(line);
             }
             
-            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(45, TimeUnit.SECONDS);
             
             if (finished && process.exitValue() == 0) {
                 return ResponseEntity.ok(output.toString());
@@ -108,7 +106,7 @@ public class DownloadController {
     public ResponseEntity<?> downloadVideo(@RequestParam String url) {
         try {
             System.out.println("Downloading video from URL: " + url);
-            if (PROXY_URL != null) {
+            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
                 System.out.println("Using proxy: " + PROXY_URL);
             }
             
@@ -181,7 +179,7 @@ public class DownloadController {
     public ResponseEntity<?> downloadAudio(@RequestParam String url) {
         try {
             System.out.println("Downloading audio from URL: " + url);
-            if (PROXY_URL != null) {
+            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
                 System.out.println("Using proxy: " + PROXY_URL);
             }
             
@@ -283,8 +281,8 @@ public class DownloadController {
         status.put("status", "healthy");
         status.put("service", "YouTube Downloader API");
         status.put("downloadDir", downloadDir);
-        status.put("proxyConfigured", PROXY_URL != null);
-        if (PROXY_URL != null) {
+        status.put("proxyConfigured", PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null"));
+        if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
             status.put("proxyUrl", PROXY_URL);
         }
         
@@ -299,7 +297,7 @@ public class DownloadController {
     // ============================================
     @GetMapping("/test-proxy")
     public ResponseEntity<?> testProxy() {
-        if (PROXY_URL == null) {
+        if (PROXY_URL == null || PROXY_URL.isEmpty() || PROXY_URL.equals("null")) {
             return ResponseEntity.ok(Map.of("message", "No proxy configured. Set PROXY_URL in the code."));
         }
         
