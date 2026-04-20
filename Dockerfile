@@ -1,4 +1,4 @@
-FROM maven:3.8.6-openjdk-11-slim AS builder
+FROM maven:3.9.6-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 COPY pom.xml .
@@ -7,14 +7,13 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-FROM openjdk:11-jre-slim
+FROM eclipse-temurin:17-jre-alpine
 
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     python3 \
-    python3-pip \
+    py3-pip \
     ffmpeg \
-    && pip3 install yt-dlp \
-    && apt-get clean
+    && pip3 install yt-dlp
 
 RUN mkdir -p /app/downloads && chmod 777 /app/downloads
 WORKDIR /app
