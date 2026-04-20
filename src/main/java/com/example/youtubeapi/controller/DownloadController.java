@@ -22,27 +22,62 @@ public class DownloadController {
     @Value("${download.dir:/app/downloads}")
     private String downloadDir;
 
-    // Endpoint 1: Get video information (metadata only)
+    // ============================================
+    // PROXY CONFIGURATION - UPDATE THIS SECTION
+    // ============================================
+    // Option A: Use a free proxy (unstable, for testing only)
+    // private static final String PROXY_URL = "http://45.87.247.26:80";
+    
+    // Option B: Use a paid proxy service like BrightData, ProxyMesh, or ScraperAPI
+    // private static final String PROXY_URL = "http://username:password@proxy-provider.com:8000";
+    
+    // Option C: Use a SOCKS5 proxy (more secure)
+    // private static final String PROXY_URL = "socks5://localhost:1080";
+    
+    // Currently disabled - set to null to use no proxy
+    private static final String PROXY_URL = null; // Change this to your proxy URL when ready
+    
+    // Helper method to add proxy to commands if configured
+    private String[] addProxyIfNeeded(String[] baseCommand) {
+        if (PROXY_URL != null && !PROXY_URL.isEmpty()) {
+            // Insert --proxy right after yt-dlp
+            String[] newCommand = new String[baseCommand.length + 2];
+            newCommand[0] = baseCommand[0]; // yt-dlp
+            newCommand[1] = "--proxy";
+            newCommand[2] = PROXY_URL;
+            System.arraycopy(baseCommand, 1, newCommand, 3, baseCommand.length - 1);
+            return newCommand;
+        }
+        return baseCommand;
+    }
+
+    // ============================================
+    // ENDPOINT 1: Get video information
+    // ============================================
     @GetMapping("/info")
     public ResponseEntity<?> getVideoInfo(@RequestParam String url) {
         try {
             System.out.println("Fetching info for URL: " + url);
+            if (PROXY_URL != null) {
+                System.out.println("Using proxy: " + PROXY_URL);
+            }
             
-            // Build yt-dlp command with cookies
-            ProcessBuilder pb = new ProcessBuilder(
+            String[] baseCommand = {
                 "yt-dlp",
-                "--cookies", "/app/cookies.txt",      // Use cookies to avoid bot detection
-                "--dump-json",                         // Output JSON format
-                "--no-download",                       // Don't download the video
-                "--no-playlist",                       // Don't process playlists
-                "--extractor-args", "youtube:player-client=android", // Use android client (more reliable)
+                "--cookies", "/app/cookies.txt",
+                "--dump-json",
+                "--no-download",
+                "--no-playlist",
+                "--extractor-args", "youtube:player-client=android",
                 url
-            );
+            };
+            
+            String[] command = addProxyIfNeeded(baseCommand);
+            ProcessBuilder pb = new ProcessBuilder(command);
             
             pb.redirectErrorStream(true);
             Process process = pb.start();
             
-            // Read the output
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             StringBuilder output = new StringBuilder();
             String line;
@@ -66,48 +101,53 @@ public class DownloadController {
         }
     }
 
-    // Endpoint 2: Download video file
+    // ============================================
+    // ENDPOINT 2: Download video file
+    // ============================================
     @GetMapping("/download")
     public ResponseEntity<?> downloadVideo(@RequestParam String url) {
         try {
             System.out.println("Downloading video from URL: " + url);
+            if (PROXY_URL != null) {
+                System.out.println("Using proxy: " + PROXY_URL);
+            }
             
-            // Create downloads directory if it doesn't exist
             File downloadDirectory = new File(downloadDir);
             if (!downloadDirectory.exists()) {
                 downloadDirectory.mkdirs();
             }
 
-            // Get video title first (for filename)
             String title = getVideoTitle(url);
             String sanitizedTitle = sanitizeFileName(title);
             String outputFile = sanitizedTitle + ".mp4";
             String outputPath = downloadDir + File.separator + outputFile;
 
-            // Build yt-dlp command with cookies
-            ProcessBuilder pb = new ProcessBuilder(
+            String[] baseCommand = {
                 "yt-dlp",
-                "--cookies", "/app/cookies.txt",      // Use cookies to avoid bot detection
-                "-f", "best[ext=mp4]",                 // Best quality MP4 format
-                "-o", outputPath,                      // Output path
-                "--no-playlist",                       // Don't process playlists
-                "--extractor-args", "youtube:player-client=android", // Use android client
+                "--cookies", "/app/cookies.txt",
+                "-f", "best[ext=mp4]",
+                "-o", outputPath,
+                "--no-playlist",
+                "--extractor-args", "youtube:player-client=android",
+                "--socket-timeout", "30",
                 url
-            );
+            };
+            
+            String[] command = addProxyIfNeeded(baseCommand);
+            ProcessBuilder pb = new ProcessBuilder(command);
             
             pb.redirectErrorStream(true);
-            System.out.println("Executing: " + String.join(" ", pb.command()));
+            System.out.println("Executing: " + String.join(" ", command));
             
             Process process = pb.start();
             
-            // Read and log output for debugging
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println(line);
             }
             
-            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(180, TimeUnit.SECONDS);
             
             if (finished && process.exitValue() == 0) {
                 File downloadedFile = new File(outputPath);
@@ -134,11 +174,16 @@ public class DownloadController {
         }
     }
 
-    // Endpoint 3: Download audio only (MP3)
+    // ============================================
+    // ENDPOINT 3: Download audio only (MP3)
+    // ============================================
     @GetMapping("/download-audio")
     public ResponseEntity<?> downloadAudio(@RequestParam String url) {
         try {
             System.out.println("Downloading audio from URL: " + url);
+            if (PROXY_URL != null) {
+                System.out.println("Using proxy: " + PROXY_URL);
+            }
             
             File downloadDirectory = new File(downloadDir);
             if (!downloadDirectory.exists()) {
@@ -150,8 +195,7 @@ public class DownloadController {
             String outputFile = sanitizedTitle + ".mp3";
             String outputPath = downloadDir + File.separator + outputFile;
 
-            // Build yt-dlp command for audio extraction
-            ProcessBuilder pb = new ProcessBuilder(
+            String[] baseCommand = {
                 "yt-dlp",
                 "--cookies", "/app/cookies.txt",
                 "-f", "bestaudio",
@@ -162,7 +206,10 @@ public class DownloadController {
                 "--no-playlist",
                 "--extractor-args", "youtube:player-client=android",
                 url
-            );
+            };
+            
+            String[] command = addProxyIfNeeded(baseCommand);
+            ProcessBuilder pb = new ProcessBuilder(command);
             
             pb.redirectErrorStream(true);
             Process process = pb.start();
@@ -173,7 +220,7 @@ public class DownloadController {
                 System.out.println(line);
             }
             
-            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(180, TimeUnit.SECONDS);
             
             if (finished && process.exitValue() == 0) {
                 File downloadedFile = new File(outputPath);
@@ -200,7 +247,9 @@ public class DownloadController {
         }
     }
 
-    // Endpoint 4: Serve downloaded file
+    // ============================================
+    // ENDPOINT 4: Serve downloaded file
+    // ============================================
     @GetMapping("/file/{fileName}")
     public ResponseEntity<Resource> serveFile(@PathVariable String fileName) {
         try {
@@ -210,9 +259,11 @@ public class DownloadController {
             if (file.exists() && file.isFile()) {
                 Resource resource = new FileSystemResource(file);
                 
+                String contentType = fileName.endsWith(".mp3") ? "audio/mpeg" : "video/mp4";
+                
                 return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
-                    .header(HttpHeaders.CONTENT_TYPE, "video/mp4")
+                    .header(HttpHeaders.CONTENT_TYPE, contentType)
                     .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(file.length()))
                     .body(resource);
             } else {
@@ -223,54 +274,91 @@ public class DownloadController {
         }
     }
 
-    // Endpoint 5: Health check
+    // ============================================
+    // ENDPOINT 5: Health check
+    // ============================================
     @GetMapping("/health")
     public ResponseEntity<?> healthCheck() {
-        Map<String, String> status = new HashMap<>();
+        Map<String, Object> status = new HashMap<>();
         status.put("status", "healthy");
         status.put("service", "YouTube Downloader API");
         status.put("downloadDir", downloadDir);
+        status.put("proxyConfigured", PROXY_URL != null);
+        if (PROXY_URL != null) {
+            status.put("proxyUrl", PROXY_URL);
+        }
         
-        // Check if cookies file exists
         File cookiesFile = new File("/app/cookies.txt");
-        status.put("cookiesExists", String.valueOf(cookiesFile.exists()));
+        status.put("cookiesExists", cookiesFile.exists());
         
         return ResponseEntity.ok(status);
     }
 
-    // Helper method: Get video title using yt-dlp
+    // ============================================
+    // ENDPOINT 6: Test proxy connectivity
+    // ============================================
+    @GetMapping("/test-proxy")
+    public ResponseEntity<?> testProxy() {
+        if (PROXY_URL == null) {
+            return ResponseEntity.ok(Map.of("message", "No proxy configured. Set PROXY_URL in the code."));
+        }
+        
+        try {
+            String[] command = {"yt-dlp", "--proxy", PROXY_URL, "--version"};
+            ProcessBuilder pb = new ProcessBuilder(command);
+            Process process = pb.start();
+            
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String version = reader.readLine();
+            process.waitFor(10, TimeUnit.SECONDS);
+            
+            return ResponseEntity.ok(Map.of(
+                "proxyConfigured", true,
+                "proxyUrl", PROXY_URL,
+                "ytDlpVersion", version != null ? version : "unknown",
+                "status", "Proxy test completed"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "Proxy test failed: " + e.getMessage()));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+    
     private String getVideoTitle(String url) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(
+        String[] baseCommand = {
             "yt-dlp",
             "--cookies", "/app/cookies.txt",
             "--get-title",
             "--no-download",
             "--no-playlist",
             url
-        );
+        };
+        
+        String[] command = addProxyIfNeeded(baseCommand);
+        ProcessBuilder pb = new ProcessBuilder(command);
         
         Process process = pb.start();
         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         
         String title = reader.readLine();
-        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+        process.waitFor(10, TimeUnit.SECONDS);
         
         return (title != null && !title.isEmpty()) ? title : "video";
     }
 
-    // Helper method: Sanitize filename (remove special characters)
     private String sanitizeFileName(String fileName) {
         if (fileName == null) return "video";
-        // Remove special characters and spaces, keep only alphanumeric
         String sanitized = fileName.replaceAll("[^a-zA-Z0-9]", "");
-        // Limit length to 50 characters
         if (sanitized.length() > 50) {
             sanitized = sanitized.substring(0, 50);
         }
-        return sanitized;
+        return sanitized.isEmpty() ? "video" : sanitized;
     }
 
-    // Helper method: Format file size (bytes to human readable)
     private String formatFileSize(long size) {
         if (size < 1024) return size + " B";
         int z = (63 - Long.numberOfLeadingZeros(size)) / 10;
