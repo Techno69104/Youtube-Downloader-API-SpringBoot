@@ -11,12 +11,13 @@ RUN mvn clean package -Dmaven.test.skip=true
 # Runtime Stage
 FROM eclipse-temurin:17-jre-alpine
 
-# Install Python, ffmpeg, and yt-dlp using the --break-system-packages flag
+# Install Python, ffmpeg, and yt-dlp
 RUN apk add --no-cache \
     python3 \
-    py3-pip \
     ffmpeg \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp \
+    curl \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
 # Create downloads directory
@@ -24,6 +25,9 @@ RUN mkdir -p /app/downloads && chmod 777 /app/downloads
 
 WORKDIR /app
 COPY --from=builder /app/target/app.jar app.jar
+
+# ⬅️ NEW: Copy the cookies file into the container
+COPY cookies.txt /app/cookies.txt
 
 EXPOSE 8080
 
