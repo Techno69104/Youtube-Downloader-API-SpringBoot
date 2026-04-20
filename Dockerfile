@@ -5,18 +5,16 @@ COPY pom.xml .
 RUN mvn dependency:go-offline -B
 
 COPY src ./src
-RUN mvn clean package -DskipTests
+# Skip both test compilation and test execution
+RUN mvn clean package -Dmaven.test.skip=true
 
 FROM eclipse-temurin:17-jre-alpine
 
-# Install runtime dependencies (no build tools needed)
+# Install yt-dlp binary directly (no compilation!)
 RUN apk add --no-cache \
-    python3 \
+    curl \
     ffmpeg \
-    curl
-
-# Download yt-dlp binary directly (no compilation!)
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp
 
 RUN mkdir -p /app/downloads && chmod 777 /app/downloads
