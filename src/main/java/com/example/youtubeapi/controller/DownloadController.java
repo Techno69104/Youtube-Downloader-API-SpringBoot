@@ -10,8 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @RestController
@@ -23,23 +22,57 @@ public class DownloadController {
     private String downloadDir;
 
     // ============================================
-    // PROXY CONFIGURATION - UPDATE THIS LINE
+    // PROXY CONFIGURATION - PROXY ROTATION SYSTEM
     // ============================================
-    // Try one of these free US proxies (updated daily)
-    // Proxy 1 (USA): http://192.252.214.128:80
-    // Proxy 2 (USA): http://47.243.62.234:80  
-    // Proxy 3 (USA): http://162.223.89.34:80
-    // Proxy 4 (Germany): http://46.4.96.137:3128
+    // List of working proxies (USA, UK, Germany for YouTube access)
+    // Format: "protocol://ip:port" or "protocol://username:password@ip:port"
+    private static final List<String> PROXY_LIST = Arrays.asList(
+        // Free proxies (for testing - replace with paid proxies for production)
+        "http://192.252.214.128:80",      // USA
+        "http://47.243.62.234:80",        // USA
+        "http://162.223.89.34:80",        // USA
+        "http://46.4.96.137:3128",        // Germany
+        "http://51.89.14.70:80",          // UK
+        "http://20.111.54.16:8123"        // USA
+        
+        // Add more proxies here for rotation
+        // "http://username:password@proxy.proxymesh.com:31280",  // Paid proxy example
+        // "http://username:pass@geo.iproyal.com:7000",          // Residential proxy example
+    );
     
-    private static final String PROXY_URL = "http://192.252.214.128:80"; // CHANGE THIS to a working proxy
+    private static int currentProxyIndex = 0;
     
-    // Helper method to add proxy to commands if configured
-    private String[] addProxyIfNeeded(String[] baseCommand) {
-        if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
+    // Helper method to get next proxy in rotation (round-robin)
+    private String getNextProxy() {
+        if (PROXY_LIST == null || PROXY_LIST.isEmpty()) {
+            return null;
+        }
+        String proxy = PROXY_LIST.get(currentProxyIndex);
+        currentProxyIndex = (currentProxyIndex + 1) % PROXY_LIST.size();
+        System.out.println("Using proxy: " + proxy);
+        return proxy;
+    }
+    
+    // Helper method to add proxy to command
+    private String[] addProxyIfNeeded(String[] baseCommand, String proxy) {
+        if (proxy != null && !proxy.isEmpty()) {
             String[] newCommand = new String[baseCommand.length + 2];
             newCommand[0] = baseCommand[0];
             newCommand[1] = "--proxy";
-            newCommand[2] = PROXY_URL;
+            newCommand[2] = proxy;
+            System.arraycopy(baseCommand, 1, newCommand, 3, baseCommand.length - 1);
+            return newCommand;
+        }
+        return baseCommand;
+    }
+    
+    // Helper method to add concurrent fragment downloading for speed
+    private String[] addConcurrentDownloads(String[] baseCommand, int concurrentFragments) {
+        if (concurrentFragments > 1) {
+            String[] newCommand = new String[baseCommand.length + 2];
+            newCommand[0] = baseCommand[0];
+            newCommand[1] = "-N";
+            newCommand[2] = String.valueOf(concurrentFragments);
             System.arraycopy(baseCommand, 1, newCommand, 3, baseCommand.length - 1);
             return newCommand;
         }
@@ -51,63 +84,79 @@ public class DownloadController {
     // ============================================
     @GetMapping("/info")
     public ResponseEntity<?> getVideoInfo(@RequestParam String url) {
-        try {
-            System.out.println("Fetching info for URL: " + url);
-            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
-                System.out.println("Using proxy: " + PROXY_URL);
-            } else {
-                System.out.println("No proxy configured");
+        // Try each proxy until one works
+        for (int attempt = 0; attempt <= PROXY_LIST.size(); attempt++) {
+            String proxy = (attempt == 0) ? null : getNextProxy();
+            
+            try {
+                System.out.println("Fetching info for URL: " + url);
+                if (proxy != null) {
+                    System.out.println("Attempt " + attempt + " with proxy: " + proxy);
+                } else {
+                    System.out.println("Attempt " + attempt + " without proxy (direct connection)");
+                }
+                
+                String[] baseCommand = {
+                    "yt-dlp",
+                    "--cookies", "/app/cookies.txt",
+                    "--dump-json",
+                    "--no-download",
+                    "--no-playlist",
+                    "--extractor-args", "youtube:player-client=android",
+                    "--socket-timeout", "30",
+                    url
+                };
+                
+                String[] command = baseCommand;
+                if (proxy != null) {
+                    command = addProxyIfNeeded(baseCommand, proxy);
+                }
+                
+                ProcessBuilder pb = new ProcessBuilder(command);
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                
+                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                StringBuilder output = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line);
+                }
+                
+                boolean finished = process.waitFor(45, TimeUnit.SECONDS);
+                
+                if (finished && process.exitValue() == 0) {
+                    return ResponseEntity.ok(output.toString());
+                }
+                
+            } catch (Exception e) {
+                System.out.println("Attempt " + attempt + " failed: " + e.getMessage());
             }
-            
-            String[] baseCommand = {
-                "yt-dlp",
-                "--cookies", "/app/cookies.txt",
-                "--dump-json",
-                "--no-download",
-                "--no-playlist",
-                "--extractor-args", "youtube:player-client=android",
-                "--socket-timeout", "30",
-                url
-            };
-            
-            String[] command = addProxyIfNeeded(baseCommand);
-            ProcessBuilder pb = new ProcessBuilder(command);
-            
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            StringBuilder output = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line);
-            }
-            
-            boolean finished = process.waitFor(45, TimeUnit.SECONDS);
-            
-            if (finished && process.exitValue() == 0) {
-                return ResponseEntity.ok(output.toString());
-            } else {
-                return ResponseEntity.internalServerError()
-                    .body(Map.of("error", "Failed to fetch video info. Exit code: " + process.exitValue()));
-            }
-            
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", e.getMessage()));
         }
+        
+        return ResponseEntity.internalServerError()
+            .body(Map.of("error", "Failed to fetch video info after trying all proxies"));
     }
 
     // ============================================
-    // ENDPOINT 2: Download video file
+    // ENDPOINT 2: Download video file (with speed optimization)
     // ============================================
     @GetMapping("/download")
-    public ResponseEntity<?> downloadVideo(@RequestParam String url) {
+    public ResponseEntity<?> downloadVideo(@RequestParam String url,
+                                            @RequestParam(required = false, defaultValue = "5") int concurrent,
+                                            @RequestParam(required = false) String proxy) {
         try {
             System.out.println("Downloading video from URL: " + url);
-            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
-                System.out.println("Using proxy: " + PROXY_URL);
+            System.out.println("Concurrent fragments: " + concurrent);
+            
+            // Use specified proxy or rotate to next available
+            String selectedProxy = proxy;
+            if (selectedProxy == null && PROXY_LIST != null && !PROXY_LIST.isEmpty()) {
+                selectedProxy = getNextProxy();
+            }
+            
+            if (selectedProxy != null) {
+                System.out.println("Using proxy: " + selectedProxy);
             }
             
             File downloadDirectory = new File(downloadDir);
@@ -131,30 +180,39 @@ public class DownloadController {
                 url
             };
             
-            String[] command = addProxyIfNeeded(baseCommand);
-            ProcessBuilder pb = new ProcessBuilder(command);
+            // Add concurrent fragment downloading for speed
+            String[] command = addConcurrentDownloads(baseCommand, concurrent);
             
+            // Add proxy if configured
+            if (selectedProxy != null) {
+                command = addProxyIfNeeded(command, selectedProxy);
+            }
+            
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
             System.out.println("Executing: " + String.join(" ", command));
             
             Process process = pb.start();
             
+            // Read and log output for debugging
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
                 System.out.println(line);
             }
             
-            boolean finished = process.waitFor(180, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(300, TimeUnit.SECONDS);
             
             if (finished && process.exitValue() == 0) {
                 File downloadedFile = new File(outputPath);
                 if (downloadedFile.exists()) {
-                    Map<String, String> response = new HashMap<>();
+                    Map<String, Object> response = new HashMap<>();
                     response.put("message", "Video downloaded successfully");
                     response.put("fileName", outputFile);
                     response.put("downloadUrl", "/api/youtube/file/" + outputFile);
                     response.put("fileSize", formatFileSize(downloadedFile.length()));
+                    response.put("proxyUsed", selectedProxy != null ? selectedProxy : "none");
+                    response.put("concurrentFragments", concurrent);
                     return ResponseEntity.ok(response);
                 } else {
                     return ResponseEntity.internalServerError()
@@ -173,14 +231,18 @@ public class DownloadController {
     }
 
     // ============================================
-    // ENDPOINT 3: Download audio only (MP3)
+    // ENDPOINT 3: Download audio only (MP3) with speed optimization
     // ============================================
     @GetMapping("/download-audio")
-    public ResponseEntity<?> downloadAudio(@RequestParam String url) {
+    public ResponseEntity<?> downloadAudio(@RequestParam String url,
+                                            @RequestParam(required = false, defaultValue = "5") int concurrent) {
         try {
             System.out.println("Downloading audio from URL: " + url);
-            if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
-                System.out.println("Using proxy: " + PROXY_URL);
+            System.out.println("Concurrent fragments: " + concurrent);
+            
+            String proxy = (PROXY_LIST != null && !PROXY_LIST.isEmpty()) ? getNextProxy() : null;
+            if (proxy != null) {
+                System.out.println("Using proxy: " + proxy);
             }
             
             File downloadDirectory = new File(downloadDir);
@@ -206,10 +268,16 @@ public class DownloadController {
                 url
             };
             
-            String[] command = addProxyIfNeeded(baseCommand);
-            ProcessBuilder pb = new ProcessBuilder(command);
+            // Add concurrent fragment downloading
+            String[] command = addConcurrentDownloads(baseCommand, concurrent);
             
+            if (proxy != null) {
+                command = addProxyIfNeeded(command, proxy);
+            }
+            
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
+            
             Process process = pb.start();
             
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -218,16 +286,18 @@ public class DownloadController {
                 System.out.println(line);
             }
             
-            boolean finished = process.waitFor(180, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(300, TimeUnit.SECONDS);
             
             if (finished && process.exitValue() == 0) {
                 File downloadedFile = new File(outputPath);
                 if (downloadedFile.exists()) {
-                    Map<String, String> response = new HashMap<>();
+                    Map<String, Object> response = new HashMap<>();
                     response.put("message", "Audio downloaded successfully");
                     response.put("fileName", outputFile);
                     response.put("downloadUrl", "/api/youtube/file/" + outputFile);
                     response.put("fileSize", formatFileSize(downloadedFile.length()));
+                    response.put("proxyUsed", proxy != null ? proxy : "none");
+                    response.put("concurrentFragments", concurrent);
                     return ResponseEntity.ok(response);
                 } else {
                     return ResponseEntity.internalServerError()
@@ -273,7 +343,7 @@ public class DownloadController {
     }
 
     // ============================================
-    // ENDPOINT 5: Health check
+    // ENDPOINT 5: Health check with proxy status
     // ============================================
     @GetMapping("/health")
     public ResponseEntity<?> healthCheck() {
@@ -281,10 +351,10 @@ public class DownloadController {
         status.put("status", "healthy");
         status.put("service", "YouTube Downloader API");
         status.put("downloadDir", downloadDir);
-        status.put("proxyConfigured", PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null"));
-        if (PROXY_URL != null && !PROXY_URL.isEmpty() && !PROXY_URL.equals("null")) {
-            status.put("proxyUrl", PROXY_URL);
-        }
+        status.put("proxyCount", PROXY_LIST.size());
+        status.put("proxiesConfigured", PROXY_LIST);
+        status.put("concurrentDownloadsEnabled", true);
+        status.put("defaultConcurrentFragments", 5);
         
         File cookiesFile = new File("/app/cookies.txt");
         status.put("cookiesExists", cookiesFile.exists());
@@ -293,33 +363,59 @@ public class DownloadController {
     }
 
     // ============================================
-    // ENDPOINT 6: Test proxy connectivity
+    // ENDPOINT 6: Test all proxies
     // ============================================
-    @GetMapping("/test-proxy")
-    public ResponseEntity<?> testProxy() {
-        if (PROXY_URL == null || PROXY_URL.isEmpty() || PROXY_URL.equals("null")) {
-            return ResponseEntity.ok(Map.of("message", "No proxy configured. Set PROXY_URL in the code."));
+    @GetMapping("/test-proxies")
+    public ResponseEntity<?> testProxies() {
+        if (PROXY_LIST == null || PROXY_LIST.isEmpty()) {
+            return ResponseEntity.ok(Map.of("message", "No proxies configured. Add proxies to PROXY_LIST."));
         }
         
-        try {
-            String[] command = {"yt-dlp", "--proxy", PROXY_URL, "--version"};
-            ProcessBuilder pb = new ProcessBuilder(command);
-            Process process = pb.start();
-            
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String version = reader.readLine();
-            process.waitFor(10, TimeUnit.SECONDS);
-            
-            return ResponseEntity.ok(Map.of(
-                "proxyConfigured", true,
-                "proxyUrl", PROXY_URL,
-                "ytDlpVersion", version != null ? version : "unknown",
-                "status", "Proxy test completed"
-            ));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError()
-                .body(Map.of("error", "Proxy test failed: " + e.getMessage()));
+        List<Map<String, Object>> results = new ArrayList<>();
+        
+        for (String proxy : PROXY_LIST) {
+            try {
+                String[] command = {"yt-dlp", "--proxy", proxy, "--version"};
+                ProcessBuilder pb = new ProcessBuilder(command);
+                Process process = pb.start();
+                
+                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                String version = reader.readLine();
+                boolean worked = process.waitFor(10, TimeUnit.SECONDS) && process.exitValue() == 0;
+                
+                Map<String, Object> result = new HashMap<>();
+                result.put("proxy", proxy);
+                result.put("working", worked);
+                if (worked) {
+                    result.put("version", version);
+                }
+                results.add(result);
+            } catch (Exception e) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("proxy", proxy);
+                result.put("working", false);
+                result.put("error", e.getMessage());
+                results.add(result);
+            }
         }
+        
+        return ResponseEntity.ok(Map.of(
+            "totalProxies", PROXY_LIST.size(),
+            "results", results
+        ));
+    }
+
+    // ============================================
+    // ENDPOINT 7: Get current proxy rotation status
+    // ============================================
+    @GetMapping("/proxy-status")
+    public ResponseEntity<?> proxyStatus() {
+        Map<String, Object> status = new HashMap<>();
+        status.put("currentProxyIndex", currentProxyIndex);
+        status.put("totalProxies", PROXY_LIST.size());
+        status.put("proxies", PROXY_LIST);
+        status.put("nextProxy", PROXY_LIST.get(currentProxyIndex));
+        return ResponseEntity.ok(status);
     }
 
     // ============================================
@@ -336,9 +432,7 @@ public class DownloadController {
             url
         };
         
-        String[] command = addProxyIfNeeded(baseCommand);
-        ProcessBuilder pb = new ProcessBuilder(command);
-        
+        ProcessBuilder pb = new ProcessBuilder(baseCommand);
         Process process = pb.start();
         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         
