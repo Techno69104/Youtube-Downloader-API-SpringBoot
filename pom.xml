@@ -19,6 +19,7 @@
     
     <properties>
         <java.version>11</java.version>
+        <start-class>com.example.youtubeapi.YoutubeDownloaderApplication</start-class>
     </properties>
     
     <dependencies>
@@ -33,6 +34,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.example.youtubeapi.YoutubeDownloaderApplication</mainClass>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
